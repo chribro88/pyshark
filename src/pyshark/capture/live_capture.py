@@ -130,3 +130,18 @@ class LiveCapture(Capture):
         """
         # Retained for backwards compatibility and to add documentation.
         return self._packets_from_tshark_sync(packet_count=packet_count)
+    
+    def sniff_continuously_async(self, packet_count=None, existing_process=None, close_tshark=True):
+        """Captures from the set interface, returning an async generator which returns packets continuously.
+
+        Can be used as follows:
+        async for packet in capture.sniff_continuously_async():
+            print('Woo, another packet:', packet)
+
+        Note: you can also call capture.apply_on_packets(packet_callback) which should have a slight performance boost.
+
+        :param packet_count: an amount of packets to capture, then stop.
+        :param existing_proces: ...
+        :param close_tshark: ...
+        """
+        return self._packets_from_tshark_async(packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark)
