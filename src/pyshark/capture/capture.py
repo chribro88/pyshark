@@ -237,6 +237,45 @@ class Capture:
                 self.eventloop.run_until_complete(
                     self._cleanup_subprocess(tshark_process))
 
+    async def _packets_from_tshark_async(self, packet_count=None, existing_process=None, close_tshark=True):
+        """Returns an async generator of packets.
+
+        This is the async version of packets_from_tshark. It wait for the completion of each coroutine and
+         implements reading packets in a async way, yielding each packet as it arrives.
+
+        :param packet_count: If given, stops after this amount of packets is captured.
+        :param existing_process: ...
+        :param close_tshark: ...
+        """
+        # NOTE: This has code duplication from the sync version, and packets_from_tshark() [the original async, non generator version] think about how to solve this
+        tshark_process = existing_process or await self._get_tshark_process(packet_count=packet_count)
+        parser = self._setup_tshark_output_parser()
+        packets_captured = 0
+        self._log.debug("Starting to go through packets")
+
+        data = b""
+        try:
+            while True:
+                try:
+                    packet, data = await parser.get_packets_from_stream(tshark_process.stdout, data,
+                                                                        got_first_packet=packets_captured > 0)
+                except EOFError:
+                    self._log.debug("EOF reached")
+                    self._eof_reached = True
+                    break
+
+                if packet:
+                    packets_captured += 1
+                    yield packet
+                if packet_count and packets_captured >= packet_count:
+                    break
+        except StopCapture:
+            pass
+        finally:
+            if close_tshark:
+                await self.close_async()
+
+    
     def apply_on_packets(self, callback, timeout=None, packet_count=None):
         """Runs through all packets and calls the given callback (a function) with each one as it is read.
 
