@@ -247,7 +247,10 @@ class Capture:
         :param existing_process: ...
         :param close_tshark: ...
         """
-        # NOTE: This has code duplication from the sync version, and packets_from_tshark() [the original async, non generator version] think about how to solve this
+        # NOTE: This still has code duplication from the sync version, and packets_from_tshark() [the original async, non generator version] 
+        # think about how to solve this
+        # ORIGINAL ASYNC VERSION [packets_from_tshark()] only used in apply_on_packets and doesnt return an awaitable. Would be redundant if apply_on_packets updated:
+        # see comments above apply_on_packets()
         tshark_process = existing_process or await self._get_tshark_process(packet_count=packet_count)
         parser = self._setup_tshark_output_parser()
         packets_captured = 0
@@ -275,31 +278,48 @@ class Capture:
             if close_tshark:
                 await self.close_async()
 
-    def apply_on_packets(self, callback, timeout=None, packet_count=None):
-        """Runs through all packets and calls the given callback (a function) with each one as it is read.
-
-        If the capture is infinite (i.e. a live capture), it will run forever, otherwise it will complete after all
-        packets have been read.
-
-        Example usage:
-        def print_callback(pkt):
-            print(pkt)
-        capture.apply_on_packets(print_callback)
-
-        If a timeout is given, raises a Timeout error if not complete before the timeout (in seconds)
-        """
-        coro = self.packets_from_tshark(callback, packet_count=packet_count)
+    def apply_on_packets(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True):
+        coro = self._apply_on_packets(callback, timeout=timeout, packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark)
+        # NOTE: If timeout is None, it will block until the completed. Rather than implement here we can add asynchronous context manager in _apply_on_packets()
+        # UPDATE: Seems to be a bug in asyncio Timeout class -  cant parse None as delay
         if timeout is not None:
             coro = asyncio.wait_for(coro, timeout)
         return self.eventloop.run_until_complete(coro)
 
+    async def apply_on_packets_async(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True):
+        coro = self._apply_on_packets(callback, timeout=timeout, packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark)
+        # NOTE: If timeout is None, it will block until the completed. Rather than implement here we can add asynchronous context manager in _apply_on_packets()
+        # UPDATE: Seems to be a bug in asyncio Timeout class -  cant parse None as delay
+        if timeout is not None:
+            coro = asyncio.wait_for(coro, timeout)
+        return await coro
+
+    async def _apply_on_packets(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True):
+        async def producer(tg, callback):
+            async for packet in self._packets_from_tshark_async(packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark):
+                tg.create_task(consumer(packet, callback))
+
+        async def consumer(packet, callback):
+            await callback(packet)
+       
+        # NOTE: New in version 3.11. Alternative achieved with asyncio.Queue and asyncio.gather
+        # BUG: timeout/delay = None should be valid but bug in asyncio
+        # async with asyncio.timeout(timeout):
+        async with asyncio.TaskGroup() as tg:
+            try:
+                producer_task = tg.create_task(producer(tg, callback))
+            except* Exception as e:
+                print(e.exceptions)
+    
     async def packets_from_tshark(self, packet_callback, packet_count=None, close_tshark=True):
         """
+        # 
         A coroutine which creates a tshark process, runs the given callback on each packet that is received from it and
         closes the process when it is done.
 
         Do not use interactively. Can be used in order to insert packets into your own eventloop.
         """
+        # NOTE: obselete. can just return await apply_on_packets_async()
         tshark_process = await self._get_tshark_process(packet_count=packet_count)
         try:
             await self._go_through_packets_from_fd(tshark_process.stdout, packet_callback, packet_count=packet_count)
