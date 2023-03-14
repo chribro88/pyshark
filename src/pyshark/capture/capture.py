@@ -278,36 +278,36 @@ class Capture:
             if close_tshark:
                 await self.close_async()
 
-    def apply_on_packets(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True):
-        coro = self._apply_on_packets(callback, timeout=timeout, packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark)
+    def apply_on_packets(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True, **callback_params):
+        coro = self._apply_on_packets(callback, timeout=timeout, packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark, **callback_params)
         # NOTE: If timeout is None, it will block until the completed. Rather than implement here we can add asynchronous context manager in _apply_on_packets()
         # UPDATE: Seems to be a bug in asyncio Timeout class -  cant parse None as delay
         if timeout is not None:
             coro = asyncio.wait_for(coro, timeout)
         return self.eventloop.run_until_complete(coro)
 
-    async def apply_on_packets_async(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True):
-        coro = self._apply_on_packets(callback, timeout=timeout, packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark)
+    async def apply_on_packets_async(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True, **callback_params):
+        coro = self._apply_on_packets(callback, timeout=timeout, packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark, **callback_params)
         # NOTE: If timeout is None, it will block until the completed. Rather than implement here we can add asynchronous context manager in _apply_on_packets()
         # UPDATE: Seems to be a bug in asyncio Timeout class -  cant parse None as delay
         if timeout is not None:
             coro = asyncio.wait_for(coro, timeout)
         return await coro
 
-    async def _apply_on_packets(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True):
-        async def producer(tg, callback):
+    async def _apply_on_packets(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True, **callback_params):
+        async def producer(tg, callback, **callback_params):
             async for packet in self._packets_from_tshark_async(packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark):
-                tg.create_task(consumer(packet, callback))
+                tg.create_task(consumer(packet, callback, **callback_params))
 
-        async def consumer(packet, callback):
-            await callback(packet)
+        async def consumer(packet, callback, **callback_params):
+            await callback(packet, **callback_params)
        
         # NOTE: New in version 3.11. Alternative achieved with asyncio.Queue and asyncio.gather
         # BUG: timeout/delay = None should be valid but bug in asyncio
         # async with asyncio.timeout(timeout):
         async with asyncio.TaskGroup() as tg:
             try:
-                producer_task = tg.create_task(producer(tg, callback))
+                producer_task = tg.create_task(producer(tg, callback, **callback_params))
             except* Exception as e:
                 print(e.exceptions)
     
