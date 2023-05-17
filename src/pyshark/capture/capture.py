@@ -237,7 +237,7 @@ class Capture:
                 self.eventloop.run_until_complete(
                     self._cleanup_subprocess(tshark_process))
 
-    def apply_on_packets(self, callback, timeout=None, packet_count=None):
+    def apply_on_packets(self, callback, timeout=None, packet_count=None, **callback_params):
         """Runs through all packets and calls the given callback (a function) with each one as it is read.
 
         If the capture is infinite (i.e. a live capture), it will run forever, otherwise it will complete after all
@@ -250,12 +250,12 @@ class Capture:
 
         If a timeout is given, raises a Timeout error if not complete before the timeout (in seconds)
         """
-        coro = self.packets_from_tshark(callback, packet_count=packet_count)
+        coro = self.packets_from_tshark(callback, packet_count=packet_count, **callback_params)
         if timeout is not None:
             coro = asyncio.wait_for(coro, timeout)
         return self.eventloop.run_until_complete(coro)
 
-    async def packets_from_tshark(self, packet_callback, packet_count=None, close_tshark=True):
+    async def packets_from_tshark(self, packet_callback, packet_count=None, close_tshark=True, **callback_params):
         """
         A coroutine which creates a tshark process, runs the given callback on each packet that is received from it and
         closes the process when it is done.
@@ -264,14 +264,14 @@ class Capture:
         """
         tshark_process = await self._get_tshark_process(packet_count=packet_count)
         try:
-            await self._go_through_packets_from_fd(tshark_process.stdout, packet_callback, packet_count=packet_count)
+            await self._go_through_packets_from_fd(tshark_process.stdout, packet_callback, packet_count=packet_count, **callback_params)
         except StopCapture:
             pass
         finally:
             if close_tshark:
                 await self.close_async()
 
-    async def _go_through_packets_from_fd(self, fd, packet_callback, packet_count=None):
+    async def _go_through_packets_from_fd(self, fd, packet_callback, packet_count=None, **callback_params):
         """A coroutine which goes through a stream and calls a given callback for each XML packet seen in it."""
         packets_captured = 0
         self._log.debug("Starting to go through packets")
@@ -291,7 +291,7 @@ class Capture:
             if packet:
                 packets_captured += 1
                 try:
-                    packet_callback(packet)
+                    packet_callback(packet, **callback_params)
                 except StopCapture:
                     self._log.debug("User-initiated capture stop in callback")
                     break
