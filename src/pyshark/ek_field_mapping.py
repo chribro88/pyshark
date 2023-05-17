@@ -45,7 +45,10 @@ class _EkFieldMapping:
             return int(field_value, 16)
         if field_type == bytes:
             try:
-                return binascii.unhexlify(field_value.replace(":", ""))
+                if '…' in field_value:
+                    return b'[truncated]' + binascii.unhexlify(field_value.replace(":", "").replace("…",""))
+                else:
+                    return binascii.unhexlify(field_value.replace(":", ""))
             except binascii.Error:
                 return field_value
 
