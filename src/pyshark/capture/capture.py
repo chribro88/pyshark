@@ -275,7 +275,6 @@ class Capture:
             if close_tshark:
                 await self.close_async()
 
-    
     def apply_on_packets(self, callback, timeout=None, packet_count=None):
         """Runs through all packets and calls the given callback (a function) with each one as it is read.
 
