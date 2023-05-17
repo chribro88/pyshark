@@ -35,6 +35,34 @@ class TsharkEkJsonParser(BaseTsharkOutputParser):
         return data[start_index:linesep_location], data[linesep_location + 1:]
 
 
+def is_data_ek_layer(layer_data):
+    # normal layer, single
+    if isinstance(layer_data, dict):
+        return True
+    
+    # raw layer
+    elif isinstance(layer_data, str):
+        return True
+    
+    # segment layer, multiple raw layer
+    elif isinstance(layer_data, list) and all(isinstance(item, str) for item in layer_data):
+        return True
+    
+    # mutliple regular layer
+    return False
+
+
+def get_first_layer(layer_name, layer_data):
+    # Check Layer can be parsed
+    if is_data_ek_layer(layer_data): 
+        return EkLayer(layer_name, layer_data), None
+    
+    # Layer is nested
+    else:
+        layer_data_ = layer_data.pop(0)
+        return EkLayer(layer_name, layer_data_), layer_data
+
+
 def packet_from_ek_packet(json_pkt):
     if USE_UJSON:
         pkt_dict = ujson.loads(json_pkt)
@@ -44,13 +72,28 @@ def packet_from_ek_packet(json_pkt):
     # We use the frame dict here and not the object access because it's faster.
     frame_dict = pkt_dict['layers'].pop('frame')
     layers = []
-    for layer in frame_dict['frame_frame_protocols'].split(':'):
-        layer_dict = pkt_dict['layers'].pop(layer, None)
-        if layer_dict is not None:
-            layers.append(EkLayer(layer, layer_dict))
+    for layer_name in frame_dict['frame_frame_protocols'].split(':'):
+        layer_data = pkt_dict['layers'].pop(layer_name, None)
+        if layer_data is not None:
+            ek_layer, layer_data = get_first_layer(layer_name, layer_data)
+            layers.append(ek_layer)
+                
+            # If any layer remaining add back to pkt_dict 
+            # - attempt to keep layers in same order as frame proto
+            # - though layer count in frame proto and pkt_dict not always match
+            # - if frame proto count < pkt_dict count, then will parse in leftovers
+            if layer_data != []:
+                # add to beginning of layer_dict, keep leftovers at end
+                pkt_dict['layers'] = {**{layer_name: layer_data}, **pkt_dict['layers']}
+
+             
     # Add all leftovers
-    for name, layer in pkt_dict['layers'].items():
-        layers.append(EkLayer(name, layer))
+    for layer_name, layer_data in pkt_dict['layers'].items():
+        # refactored names to keep consistent
+        # some layers in pkt_dict are None (e.g. 'tcp_tcp_segments') - tshark not parse properly?
+        while layer_data not in (None, []):
+            ek_layer, layer_data = get_first_layer(layer_name, layer_data)
+            layers.append(ek_layer)
 
     return Packet(layers=layers, frame_info=EkLayer('frame', frame_dict),
                   number=int(frame_dict.get('frame_frame_number', 0)),
