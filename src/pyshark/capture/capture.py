@@ -293,6 +293,79 @@ class Capture:
             coro = asyncio.wait_for(coro, timeout)
         return self.eventloop.run_until_complete(coro)
 
+    async def apply_on_packets_async(self, callback, timeout=None, packet_count=None, **callback_params):
+        """Runs through all packets and calls the given callback (a function) with each one as it is read.
+
+        If the capture is infinite (i.e. a live capture), it will run forever, otherwise it will complete after all
+        packets have been read.
+
+        Example usage:
+        async def print_callback_async(pkt):
+            asyncio.sleep(1)
+            print(pkt)
+        await capture.apply_on_packets(print_callback)
+
+        If a timeout is given, raises a Timeout error if not complete before the timeout (in seconds)
+        """
+        coro = self._apply_on_packets(callback, packet_count=packet_count, **callback_params)
+        if timeout is not None:
+            coro = asyncio.wait_for(coro, timeout)
+        return await coro
+        
+    async def _apply_on_packets(self, callback, timeout=None, packet_count=None, existing_process=None, close_tshark=True, **callback_params):
+        """
+        A coroutine which creates a tshark process, runs the given callback on each packet that is received from it and
+        closes the process when it is done.
+
+        Do not use interactively. Can be used in order to insert packets into your own eventloop.
+
+        Uses async generator _packets_from_tshark_async():
+
+        packets_from_tshark() and _go_through_packets_from_fd() become obselete:
+        i.e.
+        async def packets_from_tshark(self, packet_callback, packet_count=None, close_tshark=True):
+            await self._apply_on_packets(callback, packet_count=packet_count, close_tshark=close_tshark)
+        """
+        async def producer(tg, callback, **callback_params):
+            async for packet in self._packets_from_tshark_async(packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark):
+                tg.create_task(consumer(packet, callback, **callback_params))
+
+        async def consumer(packet, callback, **callback_params):
+            await callback(packet, **callback_params)
+       
+        # NOTE: New in version 3.11. Alternative achieved with asyncio.Queue and asyncio.gather
+        # BUG IN ASYNCIO: timeout/delay = None should be valid but raises exception
+        # async with asyncio.timeout(timeout):
+        #     async with asyncio.TaskGroup() as tg:
+        #          ...
+        # Keep implemntation in parent
+        async with asyncio.TaskGroup() as tg:
+            try:
+                producer_task = tg.create_task(producer(tg, callback, **callback_params))
+            except* Exception as e:
+                print(e.exceptions)
+
+        # Example of alternative for asyncio < 3.11
+        # async def producer(queue):
+        #     async for packet in self._packets_from_tshark_async(packet_count=packet_count, existing_process=existing_process, close_tshark=close_tshark):
+        #         queue.put_nowait(packet)
+        
+        # async def consumer(queue, callback, **callback_params):
+        #     while True:
+        #         packet = await queue.get()
+        #         await callback(packet, **callback_params)
+        #         queue.task.done()
+
+        # queue = asyncio.Queue()
+
+        # producer_task = asyncio.create_task(producer(queue))
+        # consumer_task = asyncio.create_task(consumer(queue, callback, **callback_params))
+
+        # await asyncio.gather(producer_task)
+
+        # queue.join()
+        # consumer_task.cancel()
+
     async def packets_from_tshark(self, packet_callback, packet_count=None, close_tshark=True):
         """
         A coroutine which creates a tshark process, runs the given callback on each packet that is received from it and
