@@ -67,7 +67,7 @@ class LiveCapture(Capture):
         """Returns the special tshark parameters to be used according to the configuration of this class."""
         params = super(LiveCapture, self).get_parameters(packet_count=packet_count)
         # Read from STDIN
-        params += ["-i", "-"]
+        params += ["-r", "-"]
         return params
 
     def _verify_capture_parameters(self):
@@ -86,7 +86,7 @@ class LiveCapture(Capture):
 
     def _get_dumpcap_parameters(self):
         # Don't report packet counts.
-        params = ["-q"]
+        params = ["-B", "16", "-q"]
         if self._get_tshark_version() < version.parse("2.5.0"):
             # Tshark versions older than 2.5 don't support pcapng. This flag forces dumpcap to output pcap.
             params += ["-P"]
