@@ -19,7 +19,7 @@ class LiveCapture(Capture):
     def __init__(self, interface=None, bpf_filter=None, display_filter=None, only_summaries=False,
                  decryption_key=None, encryption_type='wpa-pwk', output_file=None, decode_as=None,
                  disable_protocol=None, tshark_path=None, override_prefs=None, capture_filter=None,
-                 monitor_mode=False, use_json=False, use_ek=False,
+                 monitor_mode=False, buffer_size=None, use_json=False, use_ek=False,
                  include_raw=False, eventloop=None, custom_parameters=None,
                  debug=False):
         """Creates a new live capturer on a given interface. Does not start the actual capture itself.
@@ -38,6 +38,8 @@ class LiveCapture(Capture):
         :param tshark_path: Path of the tshark binary
         :param override_prefs: A dictionary of tshark preferences to override, {PREFERENCE_NAME: PREFERENCE_VALUE, ...}.
         :param capture_filter: Capture (wireshark) filter to use.
+        :param monitor_mode: Put the interface in "monitor mode"
+        :param buffer_size: Set capture buffer size (in MiB).
         :param disable_protocol: Tells tshark to remove a dissector for a specifc protocol.
         :param use_ek: Uses tshark in EK JSON mode. It is faster than XML but has slightly less data.
         :param use_json: DEPRECATED. Use use_ek instead.
@@ -53,6 +55,7 @@ class LiveCapture(Capture):
                                           eventloop=eventloop, custom_parameters=custom_parameters,
                                           debug=debug)
         self.bpf_filter = bpf_filter
+        self.buffer_size = buffer_size
         self.monitor_mode = monitor_mode
 
         all_interfaces = get_tshark_interfaces(tshark_path)
@@ -86,7 +89,7 @@ class LiveCapture(Capture):
 
     def _get_dumpcap_parameters(self):
         # Don't report packet counts.
-        params = ["-B", "16", "-q"]
+        params = ["-q"]
         if self._get_tshark_version() < version.parse("2.5.0"):
             # Tshark versions older than 2.5 don't support pcapng. This flag forces dumpcap to output pcap.
             params += ["-P"]
@@ -94,6 +97,8 @@ class LiveCapture(Capture):
             params += ["-f", self.bpf_filter]
         if self.monitor_mode:
             params += ["-I"]
+        if self.buffer_size:
+            params += ["-B", self.buffer_size]
         for interface in self.interfaces:
             params += ["-i", interface]
         # Write to STDOUT
